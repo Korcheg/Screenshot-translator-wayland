@@ -55,8 +55,12 @@ dkms.conf
 *.dwo
 
 #Other
-.kra~
-.kra
-.png~
-.raw
+*.kra~
+*.kra
+*.png~
+*.raw
+Main
+window
+Main.c
+main
 window_data/xmls/
