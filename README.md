@@ -1,8 +1,8 @@
 # Screenshot Translator
 
-![[b806ebc20809f9facbc5cc2fde2c16e5_MD5.svg]]
-![[cd7097deda73572fae86fdf103e5f7c6_MD5.svg]]
-![[1dc59cb82600607e158e003787a5893a_MD5.svg]]
+![Status: Work in Progress](https://img.shields.io/badge/Status-Work_in_Progress-orange) 
+![Language: C](https://img.shields.io/badge/Language-C-blue) 
+![License: GPL v3.0](https://img.shields.io/badge/license-GPL--3.0-green.svg)
 
 [![EN](https://img.shields.io/badge/lang-English-blue)](README.md) [![UK](https://img.shields.io/badge/мова-Українська-yellow)](README.uk.md)
 
