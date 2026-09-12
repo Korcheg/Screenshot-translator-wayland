@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <wayland-client.h>
+#include <xkbcommon/xkbcommon.h>
 #include "window_data/headers/shm_manager.h"
 #include "window_data/headers/xdg-shell.h"
 #include "window_data/raw_images/neo_futuristic-back.h"
@@ -15,6 +16,8 @@ struct our_state {
     struct wl_shm *shm;
     struct wl_seat *seat;
     struct wl_pointer *pointer;
+    struct wl_keyboard *keyboard;
+    struct xkb_state *kb_state;
     struct xdg_wm_base *xdg_wm_base;
     uint32_t configure_event_serial;
 };
@@ -31,9 +34,8 @@ static void registry_handle_global(void *data,
     struct our_state *state = data;
                                     
     if(strcmp(interface, wl_compositor_interface.name) == 0) {
-        state->compositor = wl_registry_bind(
-            wl_registry, name, &wl_compositor_interface, 6); 
-    }
+        state->compositor = wl_registry_bind(wl_registry, name, &wl_compositor_interface, 6); 
+    }https://cdn.discordapp.com/attachments/647866442670276618/1548235775747817552/image.png?ex=6aa6526d&is=6aa500ed&hm=af55cfd65f406c9a2ca290eaa23a2149a3336e16fd1caf34c28f08463125e450&
 
     if(strcmp(interface, wl_shm_interface.name) == 0) {
         state->shm = wl_registry_bind(wl_registry, name, &wl_shm_interface, 2);    
@@ -50,15 +52,9 @@ static void registry_handle_global(void *data,
 }
 
 
-static void registry_handle_global_remove(void *data, struct wl_registry *registry,
-		uint32_t name)
-{
-	//blank
-}
-
 static const struct wl_registry_listener registry_listener = {
     .global = registry_handle_global,
-    .global_remove = registry_handle_global_remove,
+    .global_remove = (void *)blank,
 };
 
 
@@ -85,34 +81,6 @@ static const struct xdg_wm_base_listener xdg_wm_base_listener = {
     .ping = xdg_wm_base_ping_to_pong
 };
 
-
-
-
-
-
-static void wl_seat_capabilities (void *data, struct wl_seat *seat, uint32_t capabilities) {
-
-    struct our_state *state = data;
-    printf("capability: %d\n", capabilities);
-
-    if (capabilities & WL_SEAT_CAPABILITY_POINTER) {
-        if (!state->pointer) {
-            state->pointer = wl_seat_get_pointer(seat);
-        }
-        else if (state->pointer) { // if mouse disconnected from system
-            wl_seat_release(seat);
-            state->pointer = NULL;
-        }
-    }
-    
-}
-
-
-
-static const struct wl_seat_listener seat_listener = {
-    .capabilities = wl_seat_capabilities,
-    .name = (void *)blank,
-};
 
 static void pointer_enter(void *data,
                           struct wl_pointer *wl_pointer,
@@ -173,16 +141,119 @@ static void pointer_axis_source(void *data,
            axis_source);
 }
 
+
 static const struct wl_pointer_listener pointer_listener = {
    .enter = pointer_enter,
    .leave = pointer_leave,
    .motion = pointer_motion,
-   .leave = pointer_leave,
    .button = pointer_button,
    .axis = pointer_axis,
    .frame = pointer_frame,
    .axis_source = pointer_axis_source,
 };
+
+
+static void keyboard_keymap(void *data, 
+                            struct wl_keyboard *wl_keyboard,
+                            uint32_t format,
+                            int32_t fd,
+                            uint32_t size) {
+    struct our_state *state = data;
+    char *keymap_string = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+
+    if (keymap_string == MAP_FAILED) {
+        close(fd);
+        return;
+    }
+    
+    struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    struct xkb_keymap *keymap = xkb_keymap_new_from_string(context, keymap_string, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+
+    munmap(keymap_string, size);
+    close(fd);
+    state->kb_state = xkb_state_new(keymap);
+
+}
+
+
+static void keyboard_modifiers(void *data,
+                               struct wl_keyboard *wl_keyboard,
+                               uint32_t serial,
+                               uint32_t mods_depressed,
+                               uint32_t mods_latched,
+                               uint32_t mods_locked,
+                               uint32_t group) {
+    struct our_state *state = data;
+    xkb_state_update_mask(state->kb_state, mods_depressed, mods_latched, mods_locked, 0, 0, group);
+
+}
+
+
+static void keyboard_key(void *data,
+                         struct wl_keyboard *wl_keyboard,
+                         uint32_t serial,
+                         uint32_t time,
+                         uint32_t key,
+                         uint32_t state) {
+    struct our_state *my_state = data;
+
+    uint32_t keycode = key + 8; // X11 bias (archoism from xkbcommon)
+
+    xkb_keysym_t sym = xkb_state_key_get_one_sym(my_state->kb_state, keycode);
+    if (sym == XKB_KEY_F1) {
+        printf("Pressed! F1! - sym: %u, key: %u \n", sym, keycode);
+    }
+    char buf[128];
+    xkb_state_key_get_utf8(my_state->kb_state, keycode, buf, sizeof(buf));
+    printf("UTF-8 input: %s\n", buf);
+}
+
+
+static const struct wl_keyboard_listener keyboard_listener = {
+    .keymap = keyboard_keymap,
+    .enter = (void *)blank,
+    .leave = (void *)blank,
+    .key = keyboard_key,
+    .modifiers = keyboard_modifiers,
+    .repeat_info = (void *)blank
+};
+
+
+static void wl_seat_capabilities (void *data, struct wl_seat *seat, uint32_t capabilities) {
+
+    struct our_state *state = data;
+    printf("capability: %d\n", capabilities);
+
+    if (capabilities & WL_SEAT_CAPABILITY_POINTER) {
+        if (!state->pointer) {
+            state->pointer = wl_seat_get_pointer(seat);
+            wl_pointer_add_listener(state->pointer, &pointer_listener, NULL);
+        }
+        else if (state->pointer) { // if mouse disconnected from system
+            wl_seat_release(seat);
+            state->pointer = NULL;
+        }
+    }
+    if (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) {
+        if (!state->keyboard) {
+            state->keyboard = wl_seat_get_keyboard(seat);
+
+            wl_keyboard_add_listener(state->keyboard, &keyboard_listener, state);
+        }
+        else if (state->keyboard) {
+            wl_seat_release(seat);
+            state->keyboard = NULL;
+        }
+    }
+    
+}
+
+
+static const struct wl_seat_listener seat_listener = {
+    .capabilities = wl_seat_capabilities,
+    .name = (void *)blank,
+};
+
 
 static struct wl_buffer * draw_frame(struct our_state *state) { 
     const int width = 1920, height = 1080;
@@ -253,9 +324,6 @@ main(int argc, char *argv[])
 
     xdg_surface_add_listener(xdg_surface, &xdg_surface_listener, &state);
     wl_surface_commit(surface); // first commit: -configure me
-    wl_display_roundtrip(display);
-
-    wl_pointer_add_listener(state.pointer, &pointer_listener, NULL);
     wl_display_roundtrip(display); 
 
 

@@ -40,8 +40,8 @@ At this stage, basic interaction with the display server and rendering has been 
 ### Phase 2: Input handling (In Progress) ⏳
 - [x] Obtain the global `wl_seat` object and set up handling of its events.
 - [x] Connect `wl_pointer` and handle mouse movement and clicks.
-- [ ] Connect `wl_keyboard` and handle key presses.
-- [ ] Verify manual text input works correctly.
+- [x] Connect `wl_keyboard` and handle key presses.
+- [x] Verify manual text input works correctly.
 - [ ] Create a universal function for creating and handling buttons.
 - [ ] Create a universal function for creating and handling text fields.
 
@@ -71,9 +71,10 @@ At this stage, basic interaction with the display server and rendering has been 
 **Dependencies:**
 - `gcc`
 - `wayland`
-* `wayland-protocols`
+- `wayland-protocols`
+- `libxkbcommon`
 
 **Compilation:**
 ```bash
-gcc ./window.c ./window_data/glue_code/xdg-shell.c -o window -lwayland-client
+gcc ./window.c ./window_data/glue_code/xdg-shell.c -o window -lwayland-client -lxkbcommon
 ```

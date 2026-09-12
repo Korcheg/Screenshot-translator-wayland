@@ -42,8 +42,8 @@
 ### Phase 2: Обробка вводу (In Progress) ⏳
 - [x] Отримати глобальний об'єкт `wl_seat` та створити обробку його подій
 - [x] Підключити `wl_pointer` та зробити обробку рухів та кліків миші.
-- [ ] Підключення `wl_keyboard` й обробка натискання клавіш.
-- [ ] Перевірка працювання ручного вводу тексту.
+- [x] Підключення `wl_keyboard` й обробка натискання клавіш.
+- [x] Перевірка працювання ручного вводу тексту.
 - [ ] Створення універсальної функції для створення й обробки кнопок.
 - [ ] Створення універсальної функції для створення й обробки текстових полей.
 
@@ -73,9 +73,10 @@
 **Залежності:**
 - `gcc`
 - `wayland`
-* `wayland-protocols`
+- `wayland-protocols`
+- `libxkbcommon`
 
 **Компіляція:**
 ```bash
-gcc ./window.c ./window_data/glue_code/xdg-shell.c -o window -lwayland-client
+gcc ./window.c ./window_data/glue_code/xdg-shell.c -o window -lwayland-client -lxkbcommon
 ```
