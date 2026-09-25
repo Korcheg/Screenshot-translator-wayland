@@ -5,6 +5,7 @@
 #include <xkbcommon/xkbcommon.h>
 #include "window_data/headers/shm_manager.h"
 #include "window_data/headers/xdg-shell.h"
+#include "window_data/headers/buttons.h"
 #include "window_data/raw_images/neo_futuristic-back.h"
 
 #define WL_NOOP(name) static void name() {}
@@ -12,6 +13,7 @@
 WL_NOOP(blank) // blank func for unused events in listeners
 
 struct our_state {
+    // significant components
     struct wl_compositor *compositor;
     struct wl_shm *shm;
     struct wl_seat *seat;
@@ -19,7 +21,24 @@ struct our_state {
     struct wl_keyboard *keyboard;
     struct xkb_state *kb_state;
     struct xdg_wm_base *xdg_wm_base;
-    uint32_t configure_event_serial;
+
+    //peripheral and accordant objects
+    float mouse_x;
+    float mouse_y;
+    CircleButton real_time_btn;
+    CircleButton pin_btn;
+
+    //MISC
+    struct wl_array *states;    // from xdg_toplevel_listener
+
+    uint32_t configure_event_serial; // forgotten
+};
+
+
+struct buffer {
+    struct wl_buffer *wl_buffer;
+    uint32_t *pixels_buffer;
+    bool busy;
 };
 
 
@@ -57,6 +76,32 @@ static const struct wl_registry_listener registry_listener = {
     .global_remove = (void *)blank,
 };
 
+// static void toplevel_configure(void *data, 
+//                                struct xdg_toplevel *xdg_toplevel,
+//                                int32_t width,
+//                                int32_t height,
+//                                struct wl_array *states) {
+//     struct our_state *state = data;
+//     if (width == 0 || height == 0) {
+// 		/* Compositor is deferring to us */
+// 		return;
+// 	}
+//     state->width = width;
+//     state->height = height;
+//     state->states = states;
+//
+// }
+// static void toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel) {
+// // code
+// }
+//
+//
+// static const struct xdg_toplevel_listener xdg_toplevel_listener = {
+//     .configure = toplevel_configure,
+//     .close = toplevel_close,
+//     .configure_bounds = (void *)blank,
+//     .wm_capabilities = (void *)blank,
+// };
 
 
 static void xdg_surface_configure_handler(void *data, 
@@ -80,7 +125,6 @@ static void xdg_wm_base_ping_to_pong (void *data, struct xdg_wm_base *xdg_wm_bas
 static const struct xdg_wm_base_listener xdg_wm_base_listener = {
     .ping = xdg_wm_base_ping_to_pong
 };
-
 
 static void pointer_enter(void *data,
                           struct wl_pointer *wl_pointer,
@@ -106,8 +150,11 @@ static void pointer_motion(void *data,
                            uint32_t time,
                            wl_fixed_t surface_x,
                            wl_fixed_t surface_y) {
-    printf("Motion event, time: %u, surface_x: %f, surface_y: %f\n", 
-           time, wl_fixed_to_double(surface_x), wl_fixed_to_double(surface_y));
+    struct our_state *state = data;
+    state->mouse_x = wl_fixed_to_double(surface_x);
+    state->mouse_y = wl_fixed_to_double(surface_y);
+    //printf("Motion event, time: %u, surface_x: %f, surface_y: %f\n", 
+    //       time, wl_fixed_to_double(surface_x), wl_fixed_to_double(surface_y));
 }
 
 static void pointer_button(void *data,
@@ -116,8 +163,13 @@ static void pointer_button(void *data,
                            uint32_t time,
                            uint32_t button,
                            uint32_t state) {
-    printf("Button event, serial: %u, time: %u, button: %u, state: %u\n", 
-           serial, time, button, state);
+    struct our_state *my_state = data;
+    if (state == 0) { // if released 
+    printf("is_real_time_btn_pressed: %d, x:%f. y:%f \n", is_inside_circle(&my_state->real_time_btn, my_state->mouse_x, my_state->mouse_y), my_state->mouse_x, my_state->mouse_y);
+    printf("is_pin_btn_pressed: %d, x:%f. y:%f \n", is_inside_circle(&my_state->pin_btn, my_state->mouse_x, my_state->mouse_y), my_state->mouse_x, my_state->mouse_y);
+    }
+   // printf("Button event, serial: %u, time: %u, button: %u, state: %u\n", 
+   //        serial, time, button, state);
 }
 
 static void pointer_axis(void *data,
@@ -131,7 +183,7 @@ static void pointer_axis(void *data,
 
 static void pointer_frame(void *data,
                           struct wl_pointer *wl_pointer) {
-    printf("Frame event\n");
+    //printf("Frame event\n");
 }
 
 static void pointer_axis_source(void *data,
@@ -227,7 +279,7 @@ static void wl_seat_capabilities (void *data, struct wl_seat *seat, uint32_t cap
     if (capabilities & WL_SEAT_CAPABILITY_POINTER) {
         if (!state->pointer) {
             state->pointer = wl_seat_get_pointer(seat);
-            wl_pointer_add_listener(state->pointer, &pointer_listener, NULL);
+            wl_pointer_add_listener(state->pointer, &pointer_listener, state);
         }
         else if (state->pointer) { // if mouse disconnected from system
             wl_seat_release(seat);
@@ -254,21 +306,51 @@ static const struct wl_seat_listener seat_listener = {
     .name = (void *)blank,
 };
 
+static void buffer_release (void *data, struct wl_buffer *wl_buffer) {
+    struct buffer *b = data;
+    b->busy = false;
+}
 
-static struct wl_buffer * draw_frame(struct our_state *state) { 
-    const int width = 1920, height = 1080;
-    const int stride = width * 4; // 4 is bytes for one pixel in WL_SHM_FORMAT_XRGB8888
-    const int shm_pool_size = height * stride * 2; // *2 for double-buffering
+static const struct wl_buffer_listener buffer_listener = {
+    .release = buffer_release
+};
+
+
+static void create_fixed_pool_buffers(const int max_width, const int max_height, struct wl_shm *shm, struct buffer (*buffers)[2]) {
+    int stride = max_width * 4;
+    int offset = max_height * stride;
+
+    const int shm_pool_size = max_height * stride * 2;
 
     int fd = allocate_shm_file(shm_pool_size);
     uint8_t *pool_data = mmap(NULL, shm_pool_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    struct wl_shm_pool *pool = wl_shm_create_pool(state->shm, fd, shm_pool_size);
+    struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, shm_pool_size);
 
-    int index = 0;
-    int offset = height * stride * index;
-    struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, offset, width, height, stride, WL_SHM_FORMAT_XRGB8888);
+    struct wl_buffer *buffer_1 = wl_shm_pool_create_buffer(pool,
+                                                         0,
+                                                         max_width,
+                                                         max_height,
+                                                         stride,
+                                                         WL_SHM_FORMAT_XRGB8888);
+    
 
-    uint32_t *pixels = (uint32_t *)&pool_data[offset];
+    buffers[0]->wl_buffer = buffer_1;
+    buffers[0]->pixels_buffer =(uint32_t *)&pool_data[0]; // making pointer for pixels in first buffer, in [] brackets must be offset (0 - first buffer) 
+    buffers[0]->busy = false;
+
+    struct wl_buffer *buffer_2 = wl_shm_pool_create_buffer(pool, 
+                                                           offset,        // offset (пропускаємо перший буфер)
+                                                           max_width,
+                                                           max_height,
+                                                           stride, 
+                                                           WL_SHM_FORMAT_XRGB8888);
+    buffers[1]->wl_buffer = buffer_2;
+    buffers[1]->pixels_buffer = (uint32_t *)&pool_data[offset]; //can be the slot for shm pool, but it's not now, maybe i will not need this
+    buffers[1]->busy = false;
+
+}
+
+static void draw_frame(const int width, const int height, struct buffer *buffer) { 
 
     uint8_t *image_pixels = wl_lab_data_raw_images_neo_futuristic_back_raw; // var name from imported image.c
 
@@ -283,23 +365,31 @@ static struct wl_buffer * draw_frame(struct our_state *state) {
             uint8_t b = image_pixels[image_idx + 2];
             uint8_t a = image_pixels[image_idx + 3];
 
-            // packing channels into 32 byte format
-            pixels[y * width + x] = (a << 24) | (r << 16) | (g << 8) | b;
+            // packing channels into 32 bits format (4 bytes)
+            buffer->pixels_buffer[y * width + x] = (a << 24) | (r << 16) | (g << 8) | b;
         }
     }
-
-    munmap(pool_data, shm_pool_size);
-    return buffer;
-     
-
-
 }
 
 
 int
 main(int argc, char *argv[])
-{
+{   
+    struct buffer buffers[2];
+    struct buffer *get_free_buffer() {
+        for (int i = 0; i < 2; i++)
+            if (!buffers[i].busy)
+                return &buffers[i];
+        return NULL; // both are busy
+    }
     struct our_state state = { 0 }; // { 0 } - set all fields to NULL
+    state.real_time_btn = create_circle_button(1250, 117, 79);
+    state.pin_btn = create_circle_button(656, 117, 79);
+    
+
+    int width = 1920;
+    int height = 1080;
+
 	struct wl_display *display = wl_display_connect(NULL);
     if (display) {
     printf("connected!\n");
@@ -323,6 +413,7 @@ main(int argc, char *argv[])
 
 
     xdg_surface_add_listener(xdg_surface, &xdg_surface_listener, &state);
+ // xdg_toplevel_add_listener(xdg_toplevel, &xdg_toplevel_listener, &state);
     wl_surface_commit(surface); // first commit: -configure me
     wl_display_roundtrip(display); 
 
@@ -330,13 +421,24 @@ main(int argc, char *argv[])
     printf("serial: %d", state.configure_event_serial);
 
     xdg_surface_ack_configure(xdg_surface, state.configure_event_serial); // accept configuration.
+                                                                        
+    
+    create_fixed_pool_buffers(width, height, state.shm, &buffers);
 
-    struct wl_buffer *buffer = draw_frame(&state);
-    wl_surface_attach(surface, buffer, 0, 0);
+
+    draw_frame(width, height, get_free_buffer());
+    // i suppose, i should make one call for get_free_buffer, just make a variable for buffer to show, but i will need to rebuild architecture to change buffers dynamically
+
+
+    circle_button_draw_hitbox(&state.real_time_btn, get_free_buffer()->pixels_buffer, width, height, 10, 0xFF00FF00); // get_free_buffer()->variable - "->" instead "." because we give a pointer in return at this func
+    circle_button_draw_hitbox(&state.pin_btn, get_free_buffer()->pixels_buffer, width, height, 10, 0xFF00FF00);
+
+    wl_surface_attach(surface, get_free_buffer()->wl_buffer, 0, 0);
     wl_surface_damage_buffer(surface, 0, 0, UINT32_MAX, UINT32_MAX);
 
     wl_surface_commit(surface);
 
+    
 
     while (wl_display_dispatch(display) != -1) {
         // standing in shaking and fear

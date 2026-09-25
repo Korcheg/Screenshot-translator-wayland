@@ -13,11 +13,11 @@ I was unsatisfied with the performance and struggled to deploy that translator. 
 
 ## 🚀 Current Features
 
-At this stage, basic interaction with the display server and rendering has been implemented:
-* Connecting to the Wayland compositor (`wl_display_connect`).
-* Initialization and handling of global objects for input peripherals and interface rendering.
-* Creating a window using the `xdg_shell` extension.
-* Rendering the image as a 1D array to serve as the interface.
+**At this stage, the following has been implemented:**
+- Standard window creation using `wayland-client`.
+- A universal function for drawing on the window to a specified `wl_buffer`.
+- A universal function for creating and displaying button hitboxes (in the future, rendering a button from an image onto a target buffer).
+- Laid the foundation for double buffering (for learning and experimental purposes).
 
 
 ![Interface](/window_data/Images/neo_futuristic-back.png)
@@ -43,6 +43,8 @@ At this stage, basic interaction with the display server and rendering has been 
 - [x] Connect `wl_keyboard` and handle key presses.
 - [x] Verify manual text input works correctly.
 - [ ] Create a universal function for creating and handling buttons.
+	- [x] Creation and handling of circle buttons,
+	- [ ] Creation and handling of square buttons
 - [ ] Create a universal function for creating and handling text fields.
 
 ### Phase 3: Improving interface appearance and responsiveness
@@ -76,5 +78,5 @@ At this stage, basic interaction with the display server and rendering has been 
 
 **Compilation:**
 ```bash
-gcc ./window.c ./window_data/glue_code/xdg-shell.c -o window -lwayland-client -lxkbcommon
+gcc ./window.c ./window_data/glue_code/xdg-shell.c ./window_data/glue_code/buttons.c  -o window -lwayland-client -lxkbcommon
 ```
